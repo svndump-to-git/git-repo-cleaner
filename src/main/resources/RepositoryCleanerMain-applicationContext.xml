@@ -18,15 +18,15 @@
 
 	<context:annotation-config/>
 	
-	<bean id="repoSplitter" class="org.kuali.student.git.cleaner.RepositorySplitter" />
+	<bean id="repoSplitter" class="io.github.svndump_to_git.git.cleaner.RepositorySplitter" />
 	
-	<bean id="repoRewriter" class="org.kuali.student.git.cleaner.RepositoryBlobRewriter" />
+	<bean id="repoRewriter" class="io.github.svndump_to_git.git.cleaner.RepositoryBlobRewriter" />
 	
-	<bean id="repoMPXRewriter" class="org.kuali.student.git.cleaner.RepositoryRemoveMPXRewriter" />
+	<bean id="repoMPXRewriter" class="io.github.svndump_to_git.git.cleaner.RepositoryRemoveMPXRewriter" />
 	
-	<bean id="rewriteFusionPluginData" class="org.kuali.student.git.cleaner.RewriteFusionPluginData " />
+	<bean id="rewriteFusionPluginData" class="io.github.svndump_to_git.git.cleaner.RewriteFusionPluginData " />
 
-    <bean id="splitMultiModule" class="org.kuali.student.git.cleaner.SplitMultiModuleRewriter" />
+    <bean id="splitMultiModule" class="io.github.svndump_to_git.git.cleaner.SplitMultiModuleRewriter" />
     
-    <bean id="pruneEmpty" class="org.kuali.student.git.cleaner.PruneEmptyRewriter" />
+    <bean id="pruneEmpty" class="io.github.svndump_to_git.git.cleaner.PruneEmptyRewriter" />
  </beans>
