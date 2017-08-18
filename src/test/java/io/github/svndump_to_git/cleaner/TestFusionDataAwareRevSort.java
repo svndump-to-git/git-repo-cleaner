@@ -82,7 +82,7 @@ public class TestFusionDataAwareRevSort extends AbstractGitRespositoryTestCase {
 		// create branch 1
 		GitTreeData branch1 = new GitTreeData(new DummyGitTreeNodeInitializer());
 		
-		String branch1FilePath = "src/main/java/io.github.svndump_to_gitenrollment/test.txt";
+		String branch1FilePath = "src/main/java/io/github/svndump_to_git/enrollment/test.txt";
 		storeFile (inserter, branch1, branch1FilePath, "test");
 		
 		ObjectId b1Id = commit (inserter, branch1, "created branch1");
@@ -111,7 +111,7 @@ public class TestFusionDataAwareRevSort extends AbstractGitRespositoryTestCase {
 		// create aggregate
 		GitTreeData aggregate = new GitTreeData(new DummyGitTreeNodeInitializer());
 		
-		String aggregate_file_path = "src/main/java/io.github.svndump_to_gitenrollment/pom.xml";
+		String aggregate_file_path = "src/main/java/io/github/svndump_to_git/enrollment/pom.xml";
 		storeFile (inserter, aggregate, aggregate_file_path, "pom test");
 		
 		ExternalModuleInfo module1 = new ExternalModuleInfo("module1", "branch1");
