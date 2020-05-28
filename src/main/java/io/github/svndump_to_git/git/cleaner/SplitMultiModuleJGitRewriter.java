@@ -62,13 +62,13 @@ public class SplitMultiModuleJGitRewriter {
 
 	private String targetPath;
 
-	private final String primaryBranchName;
+	private final String[] primaryBranchNames;
 	private final boolean filterBranchTips;
 
-	public SplitMultiModuleJGitRewriter(String gitRepositoryPath, boolean bare, String targetPath, String primaryBranchName, boolean filterBranchTips) throws IOException {
+	public SplitMultiModuleJGitRewriter(String gitRepositoryPath, boolean bare, String targetPath, String[] primaryBranchNames, boolean filterBranchTips) throws IOException {
 		
 		this.targetPath = targetPath;
-		this.primaryBranchName = primaryBranchName;
+		this.primaryBranchNames = primaryBranchNames;
 		this.filterBranchTips = filterBranchTips;
 		File gitRepository = new File(gitRepositoryPath);
 
@@ -88,7 +88,12 @@ public class SplitMultiModuleJGitRewriter {
 		
 		Map<String, Ref> branchHeads = repo.getRefDatabase().getRefs(Constants.R_HEADS);
 
-		Ref primaryBranchHead = branchHeads.remove(primaryBranchName);
+		Map<String, Ref> primaryBranchHeads = new HashMap<>();
+
+		for (String primaryBranchName: primaryBranchNames) {
+			Ref primaryBranchHead = branchHeads.remove(primaryBranchName);
+			primaryBranchHeads.put(primaryBranchName, primaryBranchHead);
+		}
 		
 		HashMap<ObjectId, Set<Ref>> commitToBranchMap = new HashMap<ObjectId, Set<Ref>>();
 
@@ -112,67 +117,20 @@ public class SplitMultiModuleJGitRewriter {
 		}
 		
 		// rewrite the trunk
-		ObjectId newPrimaryBranchCommitId = processPrimaryBranch(or, primaryBranchHead.getObjectId());
-		
-		GitRefUtils.createOrUpdateBranch(repo, Constants.R_HEADS + primaryBranchName, newPrimaryBranchCommitId);
-		
+		for (String primaryBranchName: primaryBranchNames) {
+
+			ObjectId newPrimaryBranchCommitId = processPrimaryBranch(or, primaryBranchHeads.get(primaryBranchName).getObjectId());
+
+			GitRefUtils.createOrUpdateBranch(repo, Constants.R_HEADS + primaryBranchName, newPrimaryBranchCommitId);
+		}
 		for (Ref branchRef : branchHeads.values()) {
 			
 			ObjectId branchHeadId = branchRef.getObjectId();
-			
-			CommitBuilder builder = new CommitBuilder();
-			
-			RevCommit commit = branchWalk.parseCommit(branchHeadId);
-			
-			builder.setAuthor(commit.getAuthorIdent());
-			builder.setCommitter(commit.getCommitterIdent());
 
-			builder.setMessage(commit.getFullMessage());
-			builder.setEncoding(commit.getEncoding());
+			ObjectId newCommitId = this.originalCommitIdToNewCommitIdMap.get(branchHeadId);
 
-			if (filterBranchTips) {
-
-				GitTreeData tree = treeProcessor
-						.extractExistingTreeDataFromCommit(commit.getId());
-
-				ObjectId targetTreeId = tree.find(repo, targetPath);
-
-				if (targetTreeId == null)
-					continue; // tree doesn't contain the target path so skip it.
-
-				builder.setTreeId(targetTreeId);
-			}
-			else {
-				builder.setTreeId(commit.getTree().getId());
-			}
-
-			branchWalk.markStart(Arrays.asList(commit.getParents()));
-			
-			branchWalk.sort(RevSort.TOPO);
-			
-			Iterator<RevCommit> branchIter = branchWalk.iterator();
-			
-			ObjectId convertedParentId = null;
-			
-			while (branchIter.hasNext()) {
-				RevCommit parentCommit = (RevCommit) branchIter.next();
-				
-				convertedParentId = this.originalCommitIdToNewCommitIdMap.get(parentCommit.getId());
-				
-				if (convertedParentId != null)
-					break;
-			}
-			
-			branchWalk.reset();
-			
-			if (convertedParentId != null)
-				builder.setParentId (convertedParentId);
-			
-			ObjectId newCommitId = objectInserter.insert(builder);
-			
-			originalCommitIdToNewCommitIdMap.put(commit.getId(), newCommitId);
-			
-			GitRefUtils.createOrUpdateBranch(repo, branchRef.getName(), newCommitId);
+			if (newCommitId != null)
+				GitRefUtils.createOrUpdateBranch(repo, branchRef.getName(), newCommitId);
 			
 		}
 		
@@ -203,6 +161,13 @@ public class SplitMultiModuleJGitRewriter {
 		
 		while (iter.hasNext()) {
 			RevCommit commit = (RevCommit) iter.next();
+
+			ObjectId newCommit = originalCommitIdToNewCommitIdMap.get(commit.getId());
+
+			if (newCommit != null) {
+				// may have rewritten this commit for another primary branch.
+				continue;
+			}
 			
 			GitTreeData tree = treeProcessor
 					.extractExistingTreeDataFromCommit(commit.getId());
@@ -325,7 +290,7 @@ public class SplitMultiModuleJGitRewriter {
 		
 		String targetPath = args[2];
 
-		String primaryBranchName = args[3];
+		String[] primaryBranchNames = args[3].trim().split(",");
 
 		/*
 		 If true then we filter the tip of the branches aswell as the primary branch.  jenkins ci conversion had this value as false where it wouldn't
@@ -335,7 +300,7 @@ public class SplitMultiModuleJGitRewriter {
 		boolean filterBranchTips = "true".equals(args[4])?true:false;
 		
 		try {
-			SplitMultiModuleJGitRewriter splitter = new SplitMultiModuleJGitRewriter (gitRepositoryPath, bare, targetPath, primaryBranchName, filterBranchTips);
+			SplitMultiModuleJGitRewriter splitter = new SplitMultiModuleJGitRewriter (gitRepositoryPath, bare, targetPath, primaryBranchNames, filterBranchTips);
 			
 			splitter.execute();
 			

@@ -16,6 +16,7 @@ package io.github.svndump_to_git.cleaner;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import io.github.svndump_to_git.git.cleaner.SplitMultiModuleJGitRewriter;
@@ -133,7 +134,7 @@ public class SplitMultiModuleRewriterTestCase extends AbstractGitRespositoryTest
 	@Test
 	public void testRevWalkGeneratorRewriter () throws MissingObjectException, IncorrectObjectTypeException, IOException {
 
-		SplitMultiModuleJGitRewriter rewriter = new SplitMultiModuleJGitRewriter(repo.getDirectory().getAbsolutePath(), true, "src/modules/my-module", "trunk", false);
+		SplitMultiModuleJGitRewriter rewriter = new SplitMultiModuleJGitRewriter(repo.getDirectory().getAbsolutePath(), true, "src/modules/my-module", new String[] {"trunk"}, false);
 		
 		rewriter.execute();
 		
