@@ -16,6 +16,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.eclipse.jgit.diff.DiffEntry;
+import org.eclipse.jgit.diff.DiffFormatter;
 import org.eclipse.jgit.errors.IncorrectObjectTypeException;
 import org.eclipse.jgit.errors.MissingObjectException;
 import org.eclipse.jgit.lib.AnyObjectId;
@@ -29,6 +31,8 @@ import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevSort;
 import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.revwalk.filter.RevFilter;
+import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.treewalk.filter.AndTreeFilter;
 import org.eclipse.jgit.treewalk.filter.PathFilter;
 import org.eclipse.jgit.treewalk.filter.TreeFilter;
@@ -57,10 +61,15 @@ public class SplitMultiModuleJGitRewriter {
 	private Map <ObjectId, ObjectId> originalCommitIdToNewCommitIdMap;
 
 	private String targetPath;
-	
-	public SplitMultiModuleJGitRewriter (String gitRepositoryPath, boolean bare, String targetPath) throws IOException {
+
+	private final String primaryBranchName;
+	private final boolean filterBranchTips;
+
+	public SplitMultiModuleJGitRewriter(String gitRepositoryPath, boolean bare, String targetPath, String primaryBranchName, boolean filterBranchTips) throws IOException {
 		
 		this.targetPath = targetPath;
+		this.primaryBranchName = primaryBranchName;
+		this.filterBranchTips = filterBranchTips;
 		File gitRepository = new File(gitRepositoryPath);
 
 
@@ -79,7 +88,7 @@ public class SplitMultiModuleJGitRewriter {
 		
 		Map<String, Ref> branchHeads = repo.getRefDatabase().getRefs(Constants.R_HEADS);
 
-		Ref trunkHead = branchHeads.remove("trunk");
+		Ref primaryBranchHead = branchHeads.remove(primaryBranchName);
 		
 		HashMap<ObjectId, Set<Ref>> commitToBranchMap = new HashMap<ObjectId, Set<Ref>>();
 
@@ -103,9 +112,9 @@ public class SplitMultiModuleJGitRewriter {
 		}
 		
 		// rewrite the trunk
-		ObjectId newTrunkCommitId = processTrunk(or, trunkHead.getObjectId()); 
+		ObjectId newPrimaryBranchCommitId = processPrimaryBranch(or, primaryBranchHead.getObjectId());
 		
-		GitRefUtils.createOrUpdateBranch(repo, Constants.R_HEADS + "trunk", newTrunkCommitId);
+		GitRefUtils.createOrUpdateBranch(repo, Constants.R_HEADS + primaryBranchName, newPrimaryBranchCommitId);
 		
 		for (Ref branchRef : branchHeads.values()) {
 			
@@ -120,8 +129,22 @@ public class SplitMultiModuleJGitRewriter {
 
 			builder.setMessage(commit.getFullMessage());
 			builder.setEncoding(commit.getEncoding());
-			
-			builder.setTreeId(commit.getTree().getId());
+
+			if (filterBranchTips) {
+
+				GitTreeData tree = treeProcessor
+						.extractExistingTreeDataFromCommit(commit.getId());
+
+				ObjectId targetTreeId = tree.find(repo, targetPath);
+
+				if (targetTreeId == null)
+					continue; // tree doesn't contain the target path so skip it.
+
+				builder.setTreeId(targetTreeId);
+			}
+			else {
+				builder.setTreeId(commit.getTree().getId());
+			}
 
 			branchWalk.markStart(Arrays.asList(commit.getParents()));
 			
@@ -158,10 +181,12 @@ public class SplitMultiModuleJGitRewriter {
 	}
 	
 
-	private ObjectId processTrunk(ObjectReader or, AnyObjectId trunkHeadId) throws MissingObjectException, IncorrectObjectTypeException, IOException {
+	private ObjectId processPrimaryBranch(ObjectReader or, AnyObjectId trunkHeadId) throws MissingObjectException, IncorrectObjectTypeException, IOException {
 		
 		RevWalk walkRepo = new RevWalk(or);
-		
+
+		walkRepo.setRevFilter(RevFilter.ALL);
+
 		walkRepo.markStart(walkRepo.parseCommit(trunkHeadId));
 		
 		// sort parents before children
@@ -170,7 +195,7 @@ public class SplitMultiModuleJGitRewriter {
 		
 		// only return commits containing the target path that has a non-zero diff to its parent
 		// JGit will automatically simplify history so that the commits returned skip over commits that don't match this criteria.
-		walkRepo.setTreeFilter(AndTreeFilter.create(PathFilter.create(targetPath), TreeFilter.ANY_DIFF));
+//		walkRepo.setTreeFilter(AndTreeFilter.create(PathFilter.create(targetPath), TreeFilter.ALL));
 		
 		Iterator<RevCommit> iter = walkRepo.iterator();
 		
@@ -182,7 +207,10 @@ public class SplitMultiModuleJGitRewriter {
 			GitTreeData tree = treeProcessor
 					.extractExistingTreeDataFromCommit(commit.getId());
 
-			
+			// check if the target path exists in the commit
+
+			// check for a diff on the target path if not a merge commit.
+
 			/*
 			 * Process in reverse order from old to new.
 			 */
@@ -195,13 +223,53 @@ public class SplitMultiModuleJGitRewriter {
 					.applyPathToExistingGitSvnId(commit.getFullMessage(), targetPath));
 			
 			builder.setEncoding(commit.getEncoding());
-			
-			
+
 			ObjectId targetTreeId = tree.find(repo, targetPath);
-			
+
+			if (targetTreeId == null) {
+				originalCommitIdToNewCommitIdMap.put(commit.getId(), lastCommitId);
+				continue; // commit does not contain the target path so skip over it.
+			}
+
+			List<ObjectId> convertedParents = convertParents(commit);
+
+			if (commit.getParentCount() == 1) {
+				// check there is a diff on the target path
+
+				TreeWalk treewalk = new TreeWalk(repo);
+
+				treewalk.addTree(commit.getParent(0).getTree());
+				treewalk.addTree(commit.getTree());
+
+				List<DiffEntry> differences = DiffEntry.scan(treewalk);
+
+				boolean foundTargetPathChange = false;
+
+				for (DiffEntry de : differences) {
+					if (de.getNewPath().startsWith(targetPath)) {
+						foundTargetPathChange = true;
+						break;
+					}
+				}
+
+				if (!foundTargetPathChange) {
+					originalCommitIdToNewCommitIdMap.put(commit.getId(), lastCommitId);
+					continue; // skip over this commit since it is a no-op.
+				}
+
+			}
+			else if (commit.getParentCount() > 1) {
+
+				if (commit.getParentCount() != convertedParents.size()) {
+					// skip over
+					originalCommitIdToNewCommitIdMap.put(commit.getId(), lastCommitId);
+					continue;
+				}
+			}
+
 			builder.setTreeId(targetTreeId);
 			
-			builder.setParentIds(convertParents(commit));
+			builder.setParentIds(convertedParents);
 			
 			lastCommitId = objectInserter.insert(builder);
 			
@@ -246,8 +314,8 @@ public class SplitMultiModuleJGitRewriter {
 	 */
 	public static void main(String[] args) {
 		
-		if (args.length != 3) {
-			log.error("USAGE: <git repository> <bare:true or false> <target path>");
+		if (args.length != 5) {
+			log.error("USAGE: <git repository> <bare:true or false> <target path> <primary branch name> <filter branch tips:true or false>");
 			System.exit(1);
 		}
 		
@@ -256,9 +324,18 @@ public class SplitMultiModuleJGitRewriter {
 		boolean bare = Boolean.valueOf(args[1].trim());
 		
 		String targetPath = args[2];
+
+		String primaryBranchName = args[3];
+
+		/*
+		 If true then we filter the tip of the branches aswell as the primary branch.  jenkins ci conversion had this value as false where it wouldn't
+		 filter the tags since they were already made on a per module basis.  Filtering the branch tips to true is more like what you would expect from a
+		 git filter-branch --subdirectory-filter <sub-dir> -- --all command.
+		 */
+		boolean filterBranchTips = "true".equals(args[4])?true:false;
 		
 		try {
-			SplitMultiModuleJGitRewriter splitter = new SplitMultiModuleJGitRewriter (gitRepositoryPath, bare, targetPath);
+			SplitMultiModuleJGitRewriter splitter = new SplitMultiModuleJGitRewriter (gitRepositoryPath, bare, targetPath, primaryBranchName, filterBranchTips);
 			
 			splitter.execute();
 			

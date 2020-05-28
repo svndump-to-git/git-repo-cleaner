@@ -133,7 +133,7 @@ public class SplitMultiModuleRewriterTestCase extends AbstractGitRespositoryTest
 	@Test
 	public void testRevWalkGeneratorRewriter () throws MissingObjectException, IncorrectObjectTypeException, IOException {
 
-		SplitMultiModuleJGitRewriter rewriter = new SplitMultiModuleJGitRewriter(repo.getDirectory().getAbsolutePath(), true, "src/modules/my-module");
+		SplitMultiModuleJGitRewriter rewriter = new SplitMultiModuleJGitRewriter(repo.getDirectory().getAbsolutePath(), true, "src/modules/my-module", "trunk", false);
 		
 		rewriter.execute();
 		
